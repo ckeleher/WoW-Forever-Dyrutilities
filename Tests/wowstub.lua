@@ -86,6 +86,8 @@ local function newRegion(kind)
 	function region:GetTexture() return self.texture end
 	function region:SetVertexColor(r, g, b, a) self.color = { r, g, b, a } end
 	function region:SetTexCoord() end
+	function region:SetColorTexture(r, g, b, a) self.color = { r, g, b, a } end
+	function region:GetNumPoints() return #self.points end
 	function region:SetText(text) self.text = text end
 	function region:GetText() return self.text end
 	function region:SetTextColor(r, g, b) self.textColor = { r, g, b } end
@@ -210,6 +212,20 @@ local function newFrame(frameType, name, parent, template)
 	function frame:GetEffectiveScale() return 1 end
 	function frame:GetCenter() return self.cx or 0, self.cy or 0 end
 	function frame:GetObjectType() return frameType end
+	function frame:GetName() return self.name end
+	function frame:GetChildren()
+		local children = {}
+		for _, f in ipairs(frames) do
+			if f.parent == self then children[#children + 1] = f end
+		end
+		return unpack(children)
+	end
+	function frame:IsProtected() return self.protected or false, false end
+	function frame:IsForbidden() return false end
+	function frame:GetSize() return self.width or 0, self.height or 0 end
+	function frame:GetScale() return self.scale or 1 end
+	function frame:GetFrameStrata() return self.strata or "MEDIUM" end
+	function frame:IsMovable() return self.movable or false end
 
 	--- Run a script the way the game would.
 	function frame:Fire(which, ...)
@@ -318,6 +334,126 @@ _G.Settings = {
 	end,
 	RegisterAddOnCategory = function(category) log("RegisterAddOnCategory", category) end,
 	OpenToCategory = function(id) log("OpenToCategory", id) end,
+}
+
+--------------------------------------------------------------------------------
+-- Loot and alert frames, and Edit Mode, shaped as retail has them. NOT yet
+-- verified on Forever: these exist so the probe can be exercised headlessly.
+--------------------------------------------------------------------------------
+
+-- The bottom managed stack, as measured on Forever (COMPAT_FINDINGS): the roll
+-- container is slot 3 of it.
+_G.BottomManagedFrameContainer = newFrame("Frame", "BottomManagedFrameContainer", UIParent, "")
+BottomManagedFrameContainer:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 120)
+BottomManagedFrameContainer.showingFrames = {}
+
+_G.GroupLootContainer = newFrame("Button", "GroupLootContainer", UIParent, "")
+GroupLootContainer:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 152)
+GroupLootContainer.isManagedFrame = true
+GroupLootContainer.layoutIndex = 3
+GroupLootContainer.layoutParent = BottomManagedFrameContainer
+BottomManagedFrameContainer.showingFrames[GroupLootContainer] = true
+
+--- Set true to make the stack's Layout put GroupLootContainer back, as
+-- Blizzard's layout code would.
+stub.layoutReanchors = false
+function BottomManagedFrameContainer:Layout()
+	log("BottomManagedFrameContainer:Layout")
+	if stub.layoutReanchors and GroupLootContainer:IsShown() then
+		GroupLootContainer:ClearAllPoints()
+		GroupLootContainer:SetPoint("BOTTOM", BottomManagedFrameContainer, "TOP", 0, 0)
+	end
+end
+
+for i = 1, 4 do
+	local f = newFrame("Frame", "GroupLootFrame" .. i, UIParent, "")
+	_G["GroupLootFrame" .. i] = f
+	f.shown = false
+	f:SetSize(277, 67)
+end
+stub.validEvents.START_LOOT_ROLL = true
+
+--- Blizzard's layout of the shown roll prompts inside the container, shaped as
+-- retail's: stacked upward from its bottom. (Forever's spacing is unmeasured.)
+function _G.GroupLootContainer_Update(self)
+	log("GroupLootContainer_Update")
+	local offset = 0
+	for i = 1, 4 do
+		local f = _G["GroupLootFrame" .. i]
+		if f:IsShown() then
+			f:ClearAllPoints()
+			f:SetPoint("BOTTOM", self, "BOTTOM", 0, offset)
+			offset = offset + 100
+		end
+	end
+end
+
+_G.AlertFrame = newFrame("Frame", "AlertFrame", UIParent, "")
+AlertFrame:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 200)
+function AlertFrame:UpdateAnchors() log("AlertFrame:UpdateAnchors") end
+function AlertFrame:SetBaseAnchorFrame(f) log("AlertFrame:SetBaseAnchorFrame", f); self.baseAnchor = f end
+function AlertFrame:ResetBaseAnchorFrame() log("AlertFrame:ResetBaseAnchorFrame"); self.baseAnchor = nil end
+
+-- Absent on Forever (COMPAT_FINDINGS); kept in the stub so the probe's call
+-- to it is still exercised.
+function _G.UIParent_ManageFramePositions()
+	log("UIParent_ManageFramePositions")
+	if stub.layoutReanchors then
+		GroupLootContainer:ClearAllPoints()
+		GroupLootContainer:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 152)
+	end
+end
+
+_G.LootAlertSystem = {
+	AddAlert = function(_, link, quantity) log("LootAlertSystem:AddAlert", link, quantity) end,
+}
+_G.C_Item = {
+	GetItemInfo = function(id)
+		if id == 6948 then return "Hearthstone", "|Hitem:6948|h[Hearthstone]|h" end
+		return nil
+	end,
+}
+
+_G.Enum = { EditModeSystem = { ActionBar = 0, CastBar = 1, Minimap = 2 } }
+_G.C_EditMode = { GetLayouts = function() return {} end }
+_G.EditModeManagerFrame = newFrame("Frame", "EditModeManagerFrame", UIParent, "")
+EditModeManagerFrame.shown = false
+EditModeManagerFrame.registeredSystemFrames = { newFrame("Frame", "MinimapCluster", UIParent, "") }
+EditModeManagerFrame.AccountSettings = {}
+function EditModeManagerFrame:EnterEditMode() self:Show() end
+function EditModeManagerFrame:ExitEditMode() self:Hide() end
+function EditModeManagerFrame:RegisterSystemFrame() end
+
+--- hooksecurefunc(table, method, hook) or hooksecurefunc(globalName, hook).
+function _G.hooksecurefunc(target, method, hook)
+	if type(target) == "string" then target, method, hook = _G, target, method end
+	local original = target[method]
+	target[method] = function(...)
+		local results = { original(...) }
+		hook(...)
+		return unpack(results)
+	end
+end
+
+-- HookScript chains rather than replaces, as the client does.
+local baseHookScript = function(self, which, fn)
+	local previous = self.scripts[which]
+	self.scripts[which] = function(...)
+		if previous then previous(...) end
+		return fn(...)
+	end
+end
+EditModeManagerFrame.HookScript = baseHookScript
+
+stub.callbacks = {}
+_G.EventRegistry = {
+	RegisterCallback = function(_, event, fn, owner)
+		stub.callbacks[event] = stub.callbacks[event] or {}
+		table.insert(stub.callbacks[event], fn)
+	end,
+	TriggerEvent = function(_, event, ...)
+		for _, fn in ipairs(stub.callbacks[event] or {}) do fn(...) end
+	end,
 }
 
 _G.SettingsPanel = newFrame("Frame", "SettingsPanel", nil, "")

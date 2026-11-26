@@ -581,6 +581,303 @@ suite("probe", function()
 	eq(#DyrutilitiesProbeDB.namespaces.Settings, 3, "ns lists a namespace's members")
 end)
 
+suite("probe: loot frames", function()
+	local probe = SlashCmdList.DYRUTILITIESPROBE
+	stub.reset()
+	probe("lootframes")
+	local record = DyrutilitiesProbeDB.lootframes
+	check(record.frames.GroupLootContainer.exists, "GroupLootContainer described")
+	check(record.frames.GroupLootContainer.points:find("BOTTOM %-> UIParent:BOTTOM"), "with its anchor")
+	eq(record.frames.BonusRollFrame.exists, false, "an absent frame is reported absent, not an error")
+	eq(record.move, nil, "without 'move', nothing is moved")
+
+	-- Move test where nothing fights back.
+	stub.layoutReanchors = false
+	probe("lootframes move")
+	local move = DyrutilitiesProbeDB.lootframes.move
+	eq(move.GroupLootContainer.set, "ok", "SetPoint is attempted")
+	eq(move.preview, "ok", "a preview toast is raised")
+	eq(stub.lastCall("LootAlertSystem:AddAlert")[1], "|Hitem:6948|h[Hearthstone]|h", "with a real item link")
+	stub.runTimers()
+	eq(move.GroupLootContainer.after1s, "held", "an unchallenged move is reported as held")
+	eq(move.AlertFrame.afterRelayout, "held", "including after a relayout")
+	local p = { GroupLootContainer:GetPoint(1) }
+	check(p[1] == "BOTTOM" and p[5] == 152, "and the frame is restored afterwards")
+
+	-- Move test where Blizzard's layout code puts it back.
+	stub.layoutReanchors = true
+	probe("lootframes move")
+	move = DyrutilitiesProbeDB.lootframes.move
+	stub.runTimers()
+	check(move.GroupLootContainer.afterRelayout ~= "held", "a re-anchor by the layout code is detected")
+	check(stub.chatMatches("RE%-ANCHORED"), "and reported")
+	stub.layoutReanchors = false
+
+	-- Refuses in combat.
+	stub.inCombat = true
+	stub.reset()
+	probe("lootframes move")
+	check(stub.chatMatches("In combat"), "the move test refuses in combat")
+	stub.inCombat = false
+end)
+
+suite("probe: managed stack, simulation, alert anchor, roll watch", function()
+	local probe = SlashCmdList.DYRUTILITIESPROBE
+	local record = DyrutilitiesProbeDB.lootframes
+
+	stub.reset()
+	probe("lootframes frobnicate")
+	check(stub.chatMatches("Unknown lootframes probe"), "an unknown lootframes subcommand is reported")
+	check(not stub.chatMatches("== Loot frames =="), "and does not run the survey")
+
+	-- Something anchored to the roll container must be noticed.
+	local leaner = CreateFrame("Frame", "LeansOnLoot", UIParent)
+	leaner:SetPoint("BOTTOM", GroupLootContainer, "TOP", 0, 4)
+	BottomManagedFrameContainer.showingFrames[leaner] = true
+	leaner.layoutIndex = 4
+
+	probe("lootframes managed")
+	eq(record.managed.name, "BottomManagedFrameContainer", "the stack is found through layoutParent")
+	check(record.managed.children[1]:find("#3.0 GroupLootContainer"), "its children are listed in layout order")
+	check(record.managed.anchoredToLoot[1] and record.managed.anchoredToLoot[1]:find("LeansOnLoot"),
+		"a frame anchored to the roll container is found")
+	BottomManagedFrameContainer.showingFrames[leaner] = nil
+	leaner:ClearAllPoints()
+
+	stub.layoutReanchors = false
+	probe("lootframes simulate")
+	stub.runTimers()
+	eq(record.simulate.show, "ok", "simulate shows the container")
+	eq(record.simulate.afterLayout, "held", "a move that the stack leaves alone is reported held")
+	check(not GroupLootContainer:IsShown(), "and the container is hidden again afterwards")
+
+	stub.layoutReanchors = true
+	GroupLootContainer:ClearAllPoints()
+	probe("lootframes simulate")
+	stub.runTimers()
+	check(record.simulate.afterLayout:find("BottomManagedFrameContainer:TOP"),
+		"a stack that re-anchors it is caught, naming where it went")
+	stub.layoutReanchors = false
+
+	stub.reset()
+	probe("lootframes alertanchor")
+	eq(record.alertAnchor.set, "ok", "SetBaseAnchorFrame is called")
+	check(AlertFrame.baseAnchor == DyrutilitiesProbeAlertAnchor, "with our anchor frame")
+	stub.runTimers()
+	eq(record.alertAnchor.reset, "ok", "and ResetBaseAnchorFrame afterwards")
+	eq(AlertFrame.baseAnchor, nil, "leaving AlertFrame as it was")
+	eq(stub.countCalls("LootAlertSystem:AddAlert"), 2, "with a preview before and after")
+
+	probe("lootframes watch")
+	GroupLootContainer:Show()
+	GroupLootFrame1:SetPoint("BOTTOM", GroupLootContainer, "BOTTOM", 0, 0)
+	GroupLootFrame1:Show()
+	stub.fire("START_LOOT_ROLL", 7, 60)
+	stub.runTimers()
+	eq(#record.rolls, 1, "a real roll is recorded")
+	check(record.rolls[1].frames[1]:find("GroupLootFrame1 at BOTTOM %-> GroupLootContainer"),
+		"with where its frame was put")
+	GroupLootFrame1:Hide()
+	GroupLootContainer:Hide()
+
+	probe("lootframes")
+	eq(#record.rolls, 1, "re-running the survey keeps the recorded rolls")
+end)
+
+suite("probe: edit mode and blocked actions", function()
+	local probe = SlashCmdList.DYRUTILITIESPROBE
+	stub.reset()
+	probe("editmode")
+	local record = DyrutilitiesProbeDB.editmode
+	eq(#record.systems, 3, "Edit Mode systems listed")
+	eq(#record.lootSystems, 0, "no native loot system found in this stub")
+	check(stub.chatMatches("no native loot or alert system"), "and that is said plainly")
+	eq(record.registered[1], "MinimapCluster", "registered system frames listed by name")
+	check(record.accountSettings, "AccountSettings panel detected")
+
+	probe("editmode watch")
+	EventRegistry:TriggerEvent("EditMode.Enter")
+	check(record.seen["EventRegistry:enter"], "EventRegistry enter is seen")
+	check(DyrutilitiesProbeDB.editmode.seen and _G.DyrutilitiesProbeEditModeOverlay:IsShown(),
+		"the test overlay shows while Edit Mode is open")
+	EditModeManagerFrame:ExitEditMode()
+	check(DyrutilitiesProbeDB.editmode.seen["ExitEditMode:exit"], "the ExitEditMode hook is seen")
+	check(not DyrutilitiesProbeEditModeOverlay:IsShown(), "and the overlay hides")
+
+	stub.reset()
+	stub.fire("ADDON_ACTION_BLOCKED", "SomeoneElse", "CastSpell()")
+	check(not stub.chatMatches("BLOCKED"), "other addons' blocked actions are ignored")
+	stub.fire("ADDON_ACTION_BLOCKED", "Dyrutilities", "Frame:SetPoint()")
+	check(stub.chatMatches("BLOCKED.*Dyrutilities"), "ours are reported")
+end)
+
+suite("module: loot frame positions", function()
+	-- A separate copy of the addon carrying the real module, as the TOC loads it.
+	local savedDB = _G.DyrutilitiesCharDB
+	_G.DyrutilitiesCharDB = nil
+	stub.reset()
+	AlertFrame.baseAnchor = nil
+	EditModeManagerFrame:Hide()
+
+	local real = {}
+	for _, path in ipairs(CORE) do loadFile(path)("Dyrutilities", real) end
+	loadFile("Modules/LootFramePositions/LootFramePositions.lua")("Dyrutilities", real)
+	for _, path in ipairs(UI) do loadFile(path)("Dyrutilities", real) end
+	stub.fire("ADDON_LOADED", "Dyrutilities")
+
+	local mod = real.modules.lootframepositions
+	check(mod ~= nil, "the module registers under its key")
+	eq(mod:IsWanted(), false, "and defaults to off")
+	eq(mod.db.showAlertHandle, false, "the Alerts handle defaults to hidden")
+	eq(mod.db.showRollHandle, false, "the Loot Rolls handle defaults to hidden")
+	eq(mod.db.alertPoint, nil, "no saved toast position")
+	check((mod:IsAvailable()), "available: Edit Mode callbacks and the alert anchor exist")
+
+	check(mod:SetWanted(true), "turning it on is accepted")
+	check(mod:IsRunning(), "and starts it live, no reload")
+	eq(AlertFrame.baseAnchor, nil, "with no saved position, toasts are left alone")
+	local alert, roll = mod.kinds.alert, mod.kinds.roll
+	check(not mod.panel:IsShown(), "the panel is hidden outside Edit Mode")
+
+	EditModeManagerFrame:EnterEditMode()
+	EventRegistry:TriggerEvent("EditMode.Enter")
+	check(mod.panel:IsShown(), "the panel shows when Edit Mode opens")
+	eq(mod.panel:GetFrameStrata(), "FULLSCREEN_DIALOG", "above Edit Mode")
+	check(not alert.handle:IsShown(), "no handle until its box is ticked")
+	local rollBox, alertBox = mod.panel.boxes.roll, mod.panel.boxes.alert
+	check(real.Compat.hasLootRollAnchor, "the roll anchor is available where GroupLootContainer_Update exists")
+	eq(rollBox:IsEnabled(), true, "so Loot Rolls can be ticked")
+
+	alertBox:Click()
+	eq(mod.db.showAlertHandle, true, "ticking Alerts is saved")
+	check(alert.handle:IsShown(), "and shows its handle")
+	rollBox:Click()
+	check(roll.handle:IsShown(), "ticking Loot Rolls shows its handle")
+
+	-- A roll before the prompts are moved: Blizzard's layout is left alone.
+	GroupLootFrame1:Show()
+	GroupLootContainer_Update(GroupLootContainer)
+	eq(select(2, GroupLootFrame1:GetPoint()), GroupLootContainer, "unmoved, prompts stay in Blizzard's container")
+
+	-- Drag the Loot Rolls handle: a showing prompt follows at once.
+	roll.anchor.cx, roll.anchor.cy = UIParent.cx - 300, UIParent.cy + 10
+	roll.handle:Fire("OnDragStop")
+	check(mod.db.rollPoint and mod.db.rollPoint[4] == -300, "the roll position is saved")
+	eq(select(2, GroupLootFrame1:GetPoint()), roll.anchor, "a showing prompt moves to our anchor")
+	-- Blizzard lays the prompts out again with a second roll: ours wins, stacked.
+	GroupLootFrame2:Show()
+	GroupLootContainer_Update(GroupLootContainer)
+	eq(select(2, GroupLootFrame1:GetPoint()), roll.anchor, "after Blizzard's relayout the first prompt is ours")
+	eq(select(2, GroupLootFrame2:GetPoint()), roll.anchor, "and so is the second")
+	eq(select(5, GroupLootFrame2:GetPoint()), 71, "stacked above the first (67 + 4)")
+	check(not GroupLootContainer.points[1] or GroupLootContainer.points[1][2] ~= roll.anchor,
+		"the container itself is never moved")
+	GroupLootFrame3:Hide(); GroupLootFrame3:Fire("OnShow")
+	check(true, "an OnShow with nothing new is harmless")
+
+	-- Drag the Alerts handle.
+	alert.handle:Fire("OnDragStart")
+	eq(stub.countCalls("StartMoving"), 1, "dragging moves our anchor")
+	alert.anchor.cx, alert.anchor.cy = UIParent.cx + 120, UIParent.cy - 40
+	alert.handle:Fire("OnDragStop")
+	local point = mod.db.alertPoint
+	check(point and point[4] == 120 and point[5] == -40, "the drop is saved as a centre offset")
+	check(AlertFrame.baseAnchor == alert.anchor, "and toasts now follow our anchor")
+
+	EventRegistry:TriggerEvent("EditMode.Exit")
+	check(not mod.panel:IsShown(), "the panel hides when Edit Mode closes")
+	check(not alert.handle:IsShown(), "and so does the handle")
+
+	-- Turning it off undoes the toast change at once; on again re-applies it.
+	mod:SetWanted(false)
+	eq(AlertFrame.baseAnchor, nil, "turning it off resets the toast anchor")
+	GroupLootContainer_Update(GroupLootContainer)
+	eq(select(2, GroupLootFrame1:GetPoint()), GroupLootContainer, "and the prompts go back to Blizzard's layout")
+	EventRegistry:TriggerEvent("EditMode.Enter")
+	check(not mod.panel:IsShown(), "a stopped module ignores Edit Mode")
+	EventRegistry:TriggerEvent("EditMode.Exit")
+	mod:SetWanted(true)
+	check(AlertFrame.baseAnchor == alert.anchor, "turning it on again re-applies the saved position")
+	eq(select(2, GroupLootFrame1:GetPoint()), roll.anchor, "for the prompts too")
+	eq(#(stub.callbacks["EditMode.Enter"] or {}) >= 1, true, "Edit Mode is hooked")
+	local hooks = #stub.callbacks["EditMode.Enter"]
+	mod:SetWanted(false); mod:SetWanted(true)
+	eq(#stub.callbacks["EditMode.Enter"], hooks, "and hooked only once across toggles")
+
+	-- Settings pane and reset.
+	local panel = CreateFrame("Frame", nil, UIParent)
+	mod:BuildSettings(panel)
+	check(mod.statusLabels.alert:GetText():find("moved"), "settings show the toasts as moved")
+	check(mod.statusLabels.roll:GetText():find("moved"), "and the roll prompts as moved")
+	mod.resetButton:Click()
+	eq(mod.db.alertPoint, nil, "Reset positions forgets the toast position")
+	eq(mod.db.rollPoint, nil, "and the roll position")
+	GroupLootContainer_Update(GroupLootContainer)
+	eq(select(2, GroupLootFrame1:GetPoint()), GroupLootContainer, "Blizzard's next layout of the prompts stands")
+	GroupLootFrame1:Hide(); GroupLootFrame2:Hide()
+	eq(AlertFrame.baseAnchor, nil, "and gives toasts back to Blizzard")
+	check(mod.statusLabels.alert:GetText():find("default"), "and the settings say so")
+
+	mod:SetWanted(false)
+	EditModeManagerFrame:Hide()
+	_G.DyrutilitiesCharDB = savedDB
+end)
+
+suite("module: loot frame positions, Blizzard's loot code loading late", function()
+	-- Not the case on Forever today (measured), but guarded against: the loot code arriving after us.
+	local savedDB = _G.DyrutilitiesCharDB
+	local update, container, frame1 = GroupLootContainer_Update, GroupLootContainer, GroupLootFrame1
+	_G.GroupLootContainer_Update, _G.GroupLootContainer, _G.GroupLootFrame1 = nil, nil, nil
+	_G.DyrutilitiesCharDB = { version = 1, modules = { lootframepositions = { enabled = true,
+		settings = { rollPoint = { "CENTER", "UIParent", "CENTER", -200, 0 } } } } }
+	stub.reset()
+	EditModeManagerFrame:Hide()
+
+	local late = {}
+	for _, path in ipairs(CORE) do loadFile(path)("Dyrutilities", late) end
+	loadFile("Modules/LootFramePositions/LootFramePositions.lua")("Dyrutilities", late)
+	for _, path in ipairs(UI) do loadFile(path)("Dyrutilities", late) end
+	stub.fire("ADDON_LOADED", "Dyrutilities")
+	eq(late.Compat.hasLootRollAnchor, false, "absent at load is seen as absent")
+	late:StartWantedModules()
+	local mod = late.modules.lootframepositions
+	check(mod:IsRunning(), "the module still starts")
+
+	EditModeManagerFrame:EnterEditMode()
+	EventRegistry:TriggerEvent("EditMode.Enter")
+	eq(mod.panel.boxes.roll:IsEnabled(), false, "Loot Rolls is unavailable while the code is missing")
+	EventRegistry:TriggerEvent("EditMode.Exit")
+	EditModeManagerFrame:Hide()
+
+	-- Blizzard's loot code arrives.
+	_G.GroupLootContainer_Update, _G.GroupLootContainer, _G.GroupLootFrame1 = update, container, frame1
+	EditModeManagerFrame:EnterEditMode()
+	EventRegistry:TriggerEvent("EditMode.Enter")
+	eq(mod.panel.boxes.roll:IsEnabled(), true, "once it exists, Loot Rolls is offered without a reload")
+	EventRegistry:TriggerEvent("EditMode.Exit")
+	EditModeManagerFrame:Hide()
+
+	stub.fire("ADDON_LOADED", "Blizzard_SomethingLoot")
+	GroupLootFrame1:Show()
+	GroupLootContainer_Update(GroupLootContainer)
+	eq(select(2, GroupLootFrame1:GetPoint()), mod.kinds.roll.anchor,
+		"the position saved earlier is hooked up when the code appears")
+
+	mod:SetWanted(false)
+	GroupLootFrame1:Hide()
+	_G.DyrutilitiesCharDB = savedDB
+end)
+
+suite("probe: load timing", function()
+	local probe = SlashCmdList.DYRUTILITIESPROBE
+	stub.reset()
+	probe("lootframes timing")
+	local timing = DyrutilitiesProbeDB.loadTiming
+	check(timing and timing.atProbeLoad:find("Update:yes"), "presence at load is recorded")
+	check(#timing.events > 0 and timing.events[1]:find("ADDON_LOADED"), "and each load event after it")
+	check(stub.chatMatches("load timing"), "and printed")
+end)
+
 --------------------------------------------------------------------------------
 -- Run
 --------------------------------------------------------------------------------

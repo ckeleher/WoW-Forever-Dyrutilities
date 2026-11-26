@@ -88,6 +88,93 @@ the start, and each value it needs must be probed in and out of combat before
 the feature is written. Not yet measured: whether this applies to all units,
 to power, or in instances only.
 
+## Loot roll and alert frames (feature F-1, 26 Nov 2026)
+
+From `/dyruprobe lootframes` and `/dyruprobe lootframes move`, out of combat,
+no loot roll in progress. **No blocked actions were recorded.**
+
+| Frame | Type | Protected | Parent | Anchor (idle) | Layout |
+|---|---|---|---|---|---|
+| `GroupLootContainer` | Button | **no** | UIParent | none while hidden | **Managed**: `isManagedFrame = true`, `layoutParent = BottomManagedFrameContainer`, `layoutIndex = 3`. Blizzard's bottom-of-screen stack positions it |
+| `GroupLootFrame1`–`4` | Frame, 277×67, DIALOG strata | no | UIParent | none while hidden | not managed; the container anchors them |
+| `AlertFrame` | Frame, 10×10 | **no** | UIParent | `BOTTOM` of UIParent, (0, 128) | **not managed** |
+| `BonusRollFrame` | Frame | no | UIParent | none while hidden | not managed |
+| `LootFrame` (personal loot window) | Frame | no | UIParent | `TOPLEFT` (16, −116) | **Edit Mode system 10**. Edit Mode already moves it |
+
+Move test (each frame re-anchored to UIParent centre for 10 s, then restored):
+
+| | `GroupLootContainer` | `AlertFrame` |
+|---|---|---|
+| `SetPoint` from addon code | ok | ok |
+| Still there after 1 s | held | held |
+| After `AlertFrame:UpdateAnchors()` | held | held |
+| A preview toast (`LootAlertSystem:AddAlert`) | | **appeared at the moved position** (seen by eye) |
+
+**Not conclusive for the roll container:** it was hidden throughout, and
+`UIParent_ManageFramePositions` does not exist on this client, so nothing
+asked the managed stack to lay it out again. What happens when a real roll
+shows it is still unmeasured.
+
+Other findings:
+
+- `AlertFrame` has `SetBaseAnchorFrame`, `ResetBaseAnchorFrame`,
+  `AddAutoAnchoredSubSystem`, `AddExternallyAnchoredSubSystem`,
+  `SetSubSystemAnchorPriority`, `CleanAnchorPriorities` and `UpdateAnchors`.
+- **`AlertFrame:SetBaseAnchorFrame(ourFrame)` works** (`/dyruprobe lootframes
+  alertanchor`, 26 Nov 2026). Both calls succeed, and a preview toast appeared beside
+  our frame (seen by eye). **`ResetBaseAnchorFrame()` works too**: the next
+  toast appeared back in the usual place. Toasts can follow a frame of ours
+  without moving Blizzard's, and the change undoes cleanly without a reload.
+- **The bottom stack takes the roll container back** (`/dyruprobe lootframes
+  managed` and `simulate`, 26 Nov 2026):
+
+  | | Observed |
+  |---|---|
+  | `BottomManagedFrameContainer` | `BOTTOM` of UIParent, (0, 35). Keeps its frames in `showingFrames` |
+  | Showing in it while idle | only `EncounterBar` (#6), at `TOP` of the stack |
+  | Anchored to `GroupLootContainer` | **nothing**, idle or shown |
+  | Container shown as a roll would | the stack puts it at `TOP -> BottomManagedFrameContainer:TOP (0, 0)` |
+  | Moved while shown, then the stack's `Layout()` | **re-anchored** to the stack's TOP again |
+
+  So moving `GroupLootContainer` itself does not stick: the next relayout
+  undoes it. Nothing else leans on the container, so re-anchoring the roll
+  frames inside it disturbs no other frame. The stack has `RemoveManagedFrame`,
+  `IgnoreLayoutIndex` and `MarkIgnoreInLayout` methods (ways to take the
+  container out of the stack); none has been tried.
+- **Still unmeasured:** how `GroupLootFrame1`–`4` are anchored inside the
+  container during a real roll. `watch` has not seen one yet.
+- **Blizzard's loot roll code is present before Dyrutilities loads**
+  (`/dyruprobe lootframes timing`, 26 Nov 2026). `GroupLootContainer_Update`,
+  `GroupLootContainer` and `GroupLootFrame1` were all present at our load,
+  and at every `ADDON_LOADED`, `PLAYER_LOGIN` and `PLAYER_ENTERING_WORLD`
+  after it. So the "Loot Rolls (not available yet)" seen earlier that day
+  was **not** load order. The cause is unexplained; most likely that session
+  was still running code from before the roll strategy was synced. The
+  on-demand check added for it is kept, because it is harmless.
+  After a `/reload`, Loot Rolls is offered in the Edit Mode panel and can be
+  ticked (seen 26 Nov 2026).
+- **Not yet seen: the prompts following our anchor in a real roll.** It is
+  presumed to work for now (user's call, 26 Nov 2026). Confirm at the first
+  group roll with `/dyruprobe lootframes watch`, then `/reload`.
+- `GroupLootContainer_*` functions exist, including `_Update`, `_AddFrame`
+  and `_RemoveFrame`. Rolls are laid out by plain global functions, which
+  `hooksecurefunc` can follow.
+- `LootAlertSystem`, `LootUpgradeAlertSystem` and `MoneyWonAlertSystem` exist
+  among 31 `*AlertSystem` globals.
+
+## Edit Mode (26 Nov 2026)
+
+| Question | Observed |
+|---|---|
+| `EditModeManagerFrame` | present, not protected |
+| `EventRegistry` callbacks `EditMode.Enter` / `EditMode.Exit` | **both fire** |
+| `hooksecurefunc` on `EnterEditMode` / `ExitEditMode`, `OnShow` / `OnHide` hooks | **all fire** |
+| An addon frame shown on Edit Mode enter, at FULLSCREEN_DIALOG strata | **visible over Edit Mode** (seen by eye), **and draggable**: both module handles drag and keep their position (seen 26 Nov 2026) |
+| `Enum.EditModeSystem` | 31 systems. The only loot one is `LootFrame = 10`, the personal loot window. **There is no native system for roll prompts or alerts** |
+| Registration API | `EditModeManagerFrame:RegisterSystemFrame` exists, but it takes an `Enum.EditModeSystem` value with Blizzard-defined settings. There is no addon-facing route |
+| `C_EditMode` | layout load/save/convert and account settings only |
+| `AccountSettings` panel (the "show" checkboxes) | present |
+
 ## Seen on disk after first login
 
 `DyrutilitiesCharDB` was created per character
