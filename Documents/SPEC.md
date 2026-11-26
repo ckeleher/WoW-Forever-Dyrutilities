@@ -290,6 +290,8 @@ addon fails to load.
 | `/dyruprobe compartment` | Does `AddonCompartmentFrame` exist, and is Dyrutilities registered in it? |
 | `/dyruprobe globals <pattern>` | Every global whose name matches a Lua pattern. Discovery for "does an API for X exist?" |
 | `/dyruprobe ns <Namespace>` | Every member of a namespace table, e.g. `C_AddOns` |
+| `/dyruprobe lootframes [move \| managed \| simulate \| alertanchor \| watch \| timing]` | Loot roll and alert frames (§11): which exist, their anchors, parents, protection and layout-manager flags. `move`: temporarily moves them, shows a preview alert, reports whether Blizzard re-anchors them, restores them. `managed`: the bottom managed stack and what anchors to the roll container. `simulate`: shows the empty roll container to see how the stack lays it out. `alertanchor`: tests `AlertFrame:SetBaseAnchorFrame`. `watch`: records where real roll frames appear. `timing`: when Blizzard's loot roll code appeared during this load |
+| `/dyruprobe editmode [watch]` | Can an addon take part in Edit Mode? `Enum.EditModeSystem`, `C_EditMode`, the manager frame's API and registered systems. `watch` reports Edit Mode enter/exit callbacks and shows a test overlay while Edit Mode is open |
 | `/dyruprobe dump` | Re-print the last survey |
 
 Every new feature that leans on an unverified API adds a probe subcommand
@@ -317,4 +319,57 @@ API actually exists on Forever. The probe covers those.
 1. D-13 to D-17 await confirmation.
 2. Whether combat lockdown needs a per-module "no toggling in combat" flag.
    Nothing needs it until a feature touches protected frames.
-3. The first features, and what each needs probed.
+3. ~~The first features, and what each needs probed.~~ First feature: §11.
+
+---
+
+## 11. Feature log
+
+A feature's decisions are recorded here until its module directory exists.
+After that they live in the module's README (§5.4), and this log keeps only a
+one-line pointer.
+
+### F-1 Loot frame positions (in development, 26 Nov 2026)
+
+Module: `Modules/LootFramePositions/` (see its README). Handles and toasts
+are verified in game. The roll prompts are presumed working, not yet seen in
+a real roll (confirm with `/dyruprobe lootframes watch`).
+
+Move the game's loot roll prompts (Need/Greed/Pass) and its "you won" loot
+popup to a position the player chooses.
+
+| # | Decision | Outcome | By |
+|---|---|---|---|
+| F-1.1 | Which frames | Both: the roll prompts and the loot-won popup, **each with its own handle** | User |
+| F-1.2 | The popup shares one anchor with every Blizzard toast | **Move the shared anchor**, so all toasts (achievements, reputation, etc.) appear at the new position | User |
+| F-1.3 | How the player positions them | **Edit Mode only**, if addons can take part in it. The dummy-frame "reposition" button in `/dyru` is built only if Edit Mode integration proves impossible | User |
+| F-1.4 | Where positions are saved | Per character (D-4) | Follows D-4 |
+| F-1.5 | How the handles appear in Edit Mode | Through **our own show-checkboxes**: a small Dyrutilities panel attached to the Edit Mode window, with "Loot Rolls" and "Alerts" checkboxes. A handle shows only while its box is ticked | User |
+| F-1.6 | Resetting to Blizzard's default | A **"Reset positions" button in the feature's settings** in `/dyru`, which resets both | User |
+
+**Answered by the first probes (26 Nov 2026, COMPAT_FINDINGS "Loot roll
+and alert frames" and "Edit Mode"):**
+1. The frames are `GroupLootContainer` (holding `GroupLootFrame1`–`4`) and
+   `AlertFrame`. **Neither is protected.**
+2. `AlertFrame` is not managed, and stays where an addon puts it.
+   `GroupLootContainer` is **managed**, slot 3 in `BottomManagedFrameContainer`,
+   so Blizzard positions it whenever a roll shows it (see 5).
+3. Edit Mode has no addon-facing registration. But its enter/exit callbacks fire
+   and our own frame shows over it, so **our own draggable handles, shown
+   while Edit Mode is open, are feasible.** F-1.3 holds, and no fallback is needed.
+4. No native system exists for roll prompts or alerts. (`LootFrame = 10` is the
+   personal loot window, already movable in Edit Mode.)
+
+**Answered since:**
+5. The bottom stack re-anchors a moved roll container on its next layout, and
+   nothing anchors to the container (26 Nov 2026). Moving the container
+   would not stick; see F-1.8.
+6. `AlertFrame:SetBaseAnchorFrame` moves toasts cleanly, and
+   `ResetBaseAnchorFrame` puts them back (26 Nov 2026). It is the mechanism
+   for F-1.2, and needs no reload either way.
+
+| # | Decision | Outcome | By |
+|---|---|---|---|
+| F-1.7 | The handles' checkboxes start | Unticked, so opening Edit Mode shows only the panel until the player asks | Claude default, to confirm |
+| F-1.8 | How the roll prompts are moved | **Re-anchor the prompts** (`GroupLootFrame1`–`4`) to our anchor after each Blizzard layout, leaving the container in the stack. Accepted side effect: the stack keeps the rolls' slot while a roll is up | User |
+| F-1.9 | Spacing between stacked prompts | 4 px (Blizzard's is unmeasured) | Claude default, to confirm |
