@@ -1,0 +1,25 @@
+## Interface: 16001
+## Title: Dyrutilities
+## Notes: A collection of small utility and quality-of-life features for WoW Forever. Every feature starts off; /dyru to choose.
+## Author: Clayton
+## Version: 0.1.0
+## SavedVariablesPerCharacter: DyrutilitiesCharDB
+## X-Category: Miscellaneous
+## X-License: MIT
+## IconTexture: Interface\Icons\INV_Misc_Wrench_01
+## AddonCompartmentFunc: Dyrutilities_OnAddonCompartmentClick
+## AddonCompartmentFuncOnEnter: Dyrutilities_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: Dyrutilities_OnAddonCompartmentLeave
+
+Core\Compat.lua
+Core\Errors.lua
+Core\DB.lua
+Core\Module.lua
+Core\Widgets.lua
+
+# Modules\<Feature>.lua files go here, one per feature, in menu order.
+
+UI\MainWindow.lua
+UI\SettingsStub.lua
+
+Core\Core.lua
