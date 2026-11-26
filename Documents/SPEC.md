@@ -47,6 +47,7 @@ were chosen to keep moving and are open to change. Confirm or overturn them.
 | D-15 | Account-wide storage | Not built. Added only when a module actually needs to share data between characters (that would also amend D-4) | **Claude default** | 25 Nov 2026 |
 | D-16 | Escape key | Closes the menu window (registered in `UISpecialFrames`) | **Claude default** | 25 Nov 2026 |
 | D-17 | TOC file name | Plain `Dyrutilities.toc`, not `Dyrutilities_Forever.toc`. With one client there is nothing to select between | **Claude default** | 25 Nov 2026 |
+| D-18 | Module documentation | Each module lives in its own directory `Modules/<Name>/` with a `README.md` explaining it functionally and technically (§5.4). Enforced by `Tests/run_tests.py` | User | 26 Nov 2026 |
 
 ---
 
@@ -88,15 +89,18 @@ Dyrutilities/
 ├── UI/
 │   ├── MainWindow.lua  the primary menu
 │   └── SettingsStub.lua  the Options › AddOns entry
-├── Modules/            one file per feature (none yet)
+├── Modules/            one directory per feature (none yet), §5.4
+│   └── <Name>/
+│       ├── <Name>.lua  registers the module; more files if needed
+│       └── README.md   functional + technical explanation (required)
 ├── Probe/Dyrutilities_Probe/   separate addon; not shipped
 ├── Tests/              headless Lua 5.1 suite + static checks
 ├── Tools/sync.ps1      copies/links into the Forever AddOns folder
 └── Documents/          SPEC.md, COMPAT_FINDINGS.md
 ```
 
-Load order (TOC): Compat → Errors → DB → Module → Widgets → `Modules/*` →
-UI → Core. Modules register at file load. Core's bootstrap runs on events.
+Load order (TOC): Compat → Errors → DB → Module → Widgets →
+`Modules/<Name>/*.lua` → UI → Core. Modules register at file load. Core's bootstrap runs on events.
 
 ### 4.1 Lifecycle
 
@@ -178,6 +182,28 @@ next login tries again.
 | either | module unavailable | refused; the checkbox is disabled and shows the reason |
 
 Flipping a pending change back before reloading clears the pending state.
+
+### 5.4 Module directory and README (D-18)
+
+Every module is a directory, `Modules/<Name>/`, where `<Name>` is the module's
+PascalCase file name. The registered key stays lowercase, e.g.
+`Modules/AutoRepair/AutoRepair.lua` registers `"autorepair"`. Each of its Lua
+files is listed in the TOC. A loose `.lua` file directly in `Modules/` is not
+allowed.
+
+Each directory must contain a `README.md`, written from
+`Documents/MODULE_README_TEMPLATE.md`, with two required top-level sections:
+
+- **`## Functional`**: for the player. What the feature does, when it acts,
+  how to use it, each setting and its default, and its known limits.
+- **`## Technical`**: for the maintainer. Files, events and hooks,
+  Blizzard APIs used (and which `Compat` accessors wrap them), secret-value
+  exposure, reload flags and why, saved data shape, combat or taint concerns,
+  and the probes and COMPAT_FINDINGS rows the feature rests on.
+
+The README is updated in the same change as any change to the module's
+behaviour or internals. `Tests/run_tests.py` fails when a module directory or
+a TOC-listed module file lacks a README, or the README lacks either section.
 
 ---
 

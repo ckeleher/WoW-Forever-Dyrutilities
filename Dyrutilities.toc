@@ -17,7 +17,8 @@ Core\DB.lua
 Core\Module.lua
 Core\Widgets.lua
 
-# Modules\<Feature>.lua files go here, one per feature, in menu order.
+# Modules go here in menu order, one directory each: Modules\<Name>\<Name>.lua
+# Every module directory needs a README.md (SPEC 5.4); Tests\run_tests.py checks.
 
 UI\MainWindow.lua
 UI\SettingsStub.lua

@@ -48,4 +48,6 @@ Record results in `Documents/COMPAT_FINDINGS.md`.
 
 - `Documents/SPEC.md`: design, decision log, module contract
 - `Documents/COMPAT_FINDINGS.md`: what has been measured on the client
+- `Modules/<Name>/README.md`: each feature, explained functionally and
+  technically. New ones start from `Documents/MODULE_README_TEMPLATE.md`
 - `Tests/README.md`: the headless test suite
