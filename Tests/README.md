@@ -23,6 +23,20 @@ venv/Scripts/python Tests/run_tests.py    # the suite
 `python Tests/luacheck.py .` is a hand-written structural checker (block and
 bracket balance, unterminated strings) that needs nothing installed.
 
+## Module layout check
+
+Before the Lua suite, `run_tests.py` checks the module layout rule (SPEC §5.4)
+in Python, because standard Lua cannot list a directory. It needs nothing
+installed. It fails when:
+
+- a module directory under `Modules/` has no `README.md`,
+- a README lacks a `## Functional` or `## Technical` heading on its own line,
+- a README still contains the template's placeholder text,
+- a `.lua` file sits loose in `Modules/` instead of in `Modules/<Name>/`,
+- a module directory has no file listed in `Dyrutilities.toc`, so the game
+  would never load it,
+- or the TOC lists a module file that does not exist.
+
 ## What is covered
 
 There are no real features yet, so `tests.lua` registers **fixture modules**,

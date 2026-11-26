@@ -41,9 +41,18 @@ their *structure* does.
 - No libraries. Plain frames, plain SavedVariables.
 - `Core/Compat.lua` is the only file that calls a version-sensitive API or
   touches a Blizzard-owned frame/global. Feature-probe, never version-check.
-- Each feature is one file in `Modules/`, registered with `ns:RegisterModule`
-  (contract in SPEC §5) and listed in the TOC. Nothing central needs editing to
-  add one.
+- Each feature lives in its own directory, `Modules/<Name>/`, with its Lua
+  (`<Name>.lua`, plus more files if it needs them), registered with
+  `ns:RegisterModule` (contract in SPEC §5) and listed in the TOC. Nothing
+  central needs editing to add one.
+- **Every module directory has a `README.md`** that explains the module both
+  functionally (what it does for the player, how to use it, its settings, its
+  limits) and technically (how it works: events, hooks, APIs, secret values,
+  reload flags, saved data, probes). Start from
+  `Documents/MODULE_README_TEMPLATE.md`. Keep it current: a change to a
+  module's behaviour or internals updates its README in the same change.
+  `Tests/run_tests.py` fails if a module has no README or the README lacks
+  either section.
 - `pcall`, never `xpcall` with arguments (Lua 5.1 drops them).
 - An unrecognised slash subcommand prints help; it never falls through to a
   default action.
